@@ -1,0 +1,2 @@
+iphone_backup_decrypt>=0.9
+pymobiledevice3>=11.43,<12   # USB 功能（probe-usb / filtered-backup）需要；已验证可在 Python 3.9 上安装导入

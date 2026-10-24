@@ -1,0 +1,14 @@
+StarMoe Box（iOS 桌面版）
+Copyright 2026 StarMoe Box iOS contributors
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+非官方工具，与 Bushiroad、bilibili 及 StarMoe 官方无关。
+本软件不包含、不分发任何游戏存档解密密钥；密钥仅在运行时从用户自行提供的官方 StarMoe Box Android APK 或密钥文件中读取。
+
+第三方组件：
+- Lucide 图标（https://lucide.dev），ISC License，Copyright (c) Lucide Contributors。界面图标的 SVG 路径来自 Lucide。
+- Qt for Python / PySide6，LGPLv3。
+- pymobiledevice3，GPLv3。
+- iphone_backup_decrypt，MIT License。
+- keyring，MIT License。
+打包后的程序包含以上组件，请同时遵守各自的许可证。

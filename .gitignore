@@ -1,0 +1,35 @@
+venv/
+.venv*/
+__pycache__/
+*.pyc
+build/
+dist/
+out/
+*.apk
+keys*.json
+*.log
+.DS_Store
+# 含真实玩家数据的截图（render_screenshots.py --folder 生成），不要提交
+screenshots/private/
+screenshots/*_real*.png
+# 构建/签名临时文件
+*.p12
+*.p8
+*.cer
+*.certSigningRequest
+packaging/windows/ChineseSimplified.isl
+*.dmg
+# 私密数据 / 密钥兜底（审计时补充）
+*.key
+*.pem
+*.mobileprovision
+*.provisionprofile
+*.zip
+*.tgz
+*.tar.gz
+*_player.json
+*.sqlite
+Manifest.db
+backup/
+.env
+.env.*

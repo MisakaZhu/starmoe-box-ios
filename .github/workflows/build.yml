@@ -1,0 +1,118 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Qt 运行库
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 fonts-noto-cjk
+      - run: pip install -r requirements.txt -r requirements-gui.txt
+      - name: 测试（无界面、不联网）
+        env: { QT_QPA_PLATFORM: offscreen, PYTHONPATH: "." }
+        run: |
+          python tests/test_all.py
+          python tests/test_keyfetch.py
+          python tests/test_gui.py
+          python tests/render_screenshots.py --apk none --folder none --out screenshots
+      - uses: actions/upload-artifact@v4
+        with: { name: screenshots, path: screenshots }
+
+  macos:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, arch: arm64 }        # Apple Silicon
+          - { os: macos-15-intel, arch: x64 }    # Intel
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: create-dmg
+        run: brew install create-dmg || true
+      - name: 构建 / 签名 / 公证 / DMG
+        # 这些 Secrets 都是可选的：没有就构建未签名版本
+        env:
+          SKIP_TESTS: "1"
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+        run: bash packaging/build_mac.sh
+      - name: 检查架构
+        run: test "$(lipo -archs 'dist/StarMoe Box.app/Contents/MacOS/StarMoeBox')" = "$([ ${{ matrix.arch }} = arm64 ] && echo arm64 || echo x86_64)"
+      - uses: actions/upload-artifact@v4
+        with: { name: "StarMoeBox-mac-${{ matrix.arch }}", path: "dist/StarMoeBox-mac-${{ matrix.arch }}.dmg" }
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: 构建 + Inno Setup 安装包
+        env: { SKIP_TESTS: "1" }
+        run: powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
+      - name: 静默安装 / 卸载冒烟测试
+        shell: pwsh
+        run: |
+          $p = Start-Process dist\StarMoeBox-Setup.exe -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "install failed: $($p.ExitCode)" }
+          $exe = "$env:LOCALAPPDATA\Programs\StarMoe Box\StarMoeBox.exe"
+          if (-not (Test-Path $exe)) { throw "not installed to $exe" }
+          $cmd = (Get-ItemProperty 'HKCU:\Software\Classes\moe.starmoe.box\shell\open\command').'(default)'
+          if ($cmd -notlike "*StarMoeBox.exe*") { throw "URL protocol not registered: $cmd" }
+          $s = Start-Process $exe -ArgumentList '--selftest' -Wait -PassThru
+          if ($s.ExitCode -ne 0) { throw "selftest failed" }
+          $u = Start-Process "$env:LOCALAPPDATA\Programs\StarMoe Box\unins000.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES' -Wait -PassThru
+          Start-Sleep 3
+          if (Test-Path 'HKCU:\Software\Classes\moe.starmoe.box') { throw "URL protocol not removed on uninstall" }
+          Write-Host "install/uninstall OK"
+      - uses: actions/upload-artifact@v4
+        with: { name: StarMoeBox-windows, path: dist/StarMoeBox-Setup.exe }
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - name: 整理文件名
+        run: |
+          mkdir -p release
+          cp artifacts/StarMoeBox-mac-arm64/StarMoeBox-mac-arm64.dmg release/
+          cp artifacts/StarMoeBox-mac-x64/StarMoeBox-mac-x64.dmg release/
+          cp artifacts/StarMoeBox-windows/StarMoeBox-Setup.exe release/
+          cd release && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            release/StarMoeBox-mac-arm64.dmg
+            release/StarMoeBox-mac-x64.dmg
+            release/StarMoeBox-Setup.exe
+            release/SHA256SUMS.txt

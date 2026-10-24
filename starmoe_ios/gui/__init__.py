@@ -1,0 +1,6 @@
+"""StarMoe Box（iOS 版）桌面 GUI —— PySide6。业务逻辑全部复用 starmoe_ios 下的模块。"""
+APP_NAME = "StarMoeBox"
+APP_DISPLAY = "StarMoe Box"
+VERSION = "0.1.0"
+SOURCE_URL = "https://github.com/MisakaZhu/starmoe-box-ios"
+HELP_URL = SOURCE_URL + "#常见问题"
