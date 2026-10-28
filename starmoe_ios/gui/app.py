@@ -678,18 +678,29 @@ def selftest():
     mods = ["pymobiledevice3.usbmux", "pymobiledevice3.lockdown", "pymobiledevice3.services.mobilebackup2",
             "pymobiledevice3.services.device_link", "pymobiledevice3.services.installation_proxy",
             "pymobiledevice3.services.house_arrest", "pymobiledevice3.exceptions", "iphone_backup_decrypt", "keyring",
-            "PySide6.QtSvg", "PySide6.QtNetwork"]
+            "PySide6.QtSvg", "PySide6.QtNetwork", "certifi", "starmoe_ios.tls"]
     bad = []
     for m in mods:
         try:
             importlib.import_module(m)
         except Exception as e:   # noqa: BLE001
             bad.append(f"{m}: {e!r}")
+    ca_note = ""
+    try:
+        from ..tls import ca_bundle, ssl_backend
+        p = ca_bundle()
+        n = os.path.getsize(p)
+        if n < 10000:
+            bad.append(f"ca bundle too small: {p} ({n})")
+        else:
+            ca_note = f"tls: {ssl_backend()} ca={p} ({n} bytes)\n"
+    except Exception as e:   # noqa: BLE001
+        bad.append(f"ca bundle: {e!r}")
     import keyring
     kb = keyring.get_keyring()
     out = os.path.join(paths.log_dir(), "selftest.txt")
     msg = (f"{APP_DISPLAY} v{VERSION} selftest\nkeyring backend: {type(kb).__module__}.{type(kb).__name__}\n" +
-           ("OK\n" if not bad else "FAILED\n" + "\n".join(bad) + "\n"))
+           ca_note + ("OK\n" if not bad else "FAILED\n" + "\n".join(bad) + "\n"))
     with open(out, "w", encoding="utf-8") as f:
         f.write(msg)
     if sys.stdout:

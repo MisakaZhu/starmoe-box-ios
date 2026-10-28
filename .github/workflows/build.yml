@@ -25,6 +25,7 @@ jobs:
         run: |
           python tests/test_all.py
           python tests/test_keyfetch.py
+          python tests/test_tls.py
           python tests/test_gui.py
           python tests/render_screenshots.py --apk none --folder none --out screenshots
       - uses: actions/upload-artifact@v4
@@ -42,6 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        id: py
         with: { python-version: "3.12" }
       - name: create-dmg
         run: brew install create-dmg || true
@@ -49,6 +51,7 @@ jobs:
         # 这些 Secrets 都是可选的：没有就构建未签名版本
         env:
           SKIP_TESTS: "1"
+          PYTHON: ${{ steps.py.outputs.python-path }}
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
@@ -70,9 +73,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
+        id: py
         with: { python-version: "3.12" }
       - name: 构建 + Inno Setup 安装包
-        env: { SKIP_TESTS: "1" }
+        env:
+          SKIP_TESTS: "1"
+          # 必须是 setup-python 的解释器。脚本若回退到「py -3」会选中镜像里的 Python 3.15t。
+          PYTHON: ${{ steps.py.outputs.python-path }}
         run: powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
       - name: 静默安装 / 卸载冒烟测试
         shell: pwsh

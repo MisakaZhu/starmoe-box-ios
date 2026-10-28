@@ -8,6 +8,7 @@
 """
 import hashlib, json, logging, os, time, urllib.error, urllib.parse, urllib.request
 from .errors import StarMoeError, ERR_NETWORK, ERR_KEYS
+from .tls import build_opener
 
 log = logging.getLogger("starmoe.keyfetch")
 REPO = "StarMoe-org/StarMoe-box"
@@ -37,7 +38,7 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-_opener = urllib.request.build_opener(_SafeRedirect)   # 仍会使用系统/环境变量里的代理设置
+_opener = build_opener(_SafeRedirect)   # HTTPS 使用系统证书库或 certifi；仍走系统/环境变量里的代理
 
 
 def _open(url, timeout, headers=None):

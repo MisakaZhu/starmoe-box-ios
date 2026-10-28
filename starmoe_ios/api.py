@@ -1,6 +1,7 @@
 """StarMoe Passport (Logto) 登录 + starmoe-api 存档接口，与 StarMoe Box 一致。"""
 import base64, gzip, hashlib, json, os, secrets, time, urllib.parse, urllib.request, urllib.error
 from .errors import StarMoeError, ERR_AUTH, ERR_AUTH_EXPIRED, ERR_NETWORK
+from .tls import urlopen
 
 ENDPOINT = os.environ.get("STARMOE_PASSPORT", "https://passport.star.moe")
 RESOURCE = os.environ.get("STARMOE_API_RESOURCE", "https://passport.bdon.moe")
@@ -98,7 +99,7 @@ def display_name(claims):
 
 def _open(req, timeout):
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urlopen(req, timeout) as r:
             return r.read()
     except urllib.error.HTTPError as e:
         raise ApiError(e.code, e.read()[:300].decode("utf8", "replace"))

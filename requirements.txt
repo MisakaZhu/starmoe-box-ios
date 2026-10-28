@@ -1,2 +1,7 @@
 iphone_backup_decrypt>=0.9
 pymobiledevice3>=11.43,<12   # USB 功能（probe-usb / filtered-backup）需要；已验证可在 Python 3.9 上安装导入
+# 49+ 不再发布 macOS x86_64 wheel。在 Intel 上源码构建会动态链接 Homebrew OpenSSL 3，
+# 运行时和 sslpsk-pmd3 自带的 libcrypto.3.dylib 撞名（缺 EVP_DigestSqueeze）。48.x 的 universal2 wheel 静态链接 OpenSSL。
+cryptography>=43,<49
+certifi>=2024.2.2   # PyInstaller 冻结后没有系统 CA 目录，urllib 必须加载 certifi 的 cacert.pem
+truststore>=0.9; python_version >= "3.10"   # 有则优先用操作系统证书库，导入失败时回退 certifi

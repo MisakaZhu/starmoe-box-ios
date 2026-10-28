@@ -3,7 +3,7 @@
 # 设 STARMOE_ONEFILE=1 则生成单文件 StarMoeBox.exe），Linux → onedir（仅供测试）
 # 用法（在仓库根目录）：pyinstaller --noconfirm --clean packaging/starmoe_box.spec
 import os, re, sys
-from PyInstaller.utils.hooks import collect_all, collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_all, collect_data_files, collect_submodules, copy_metadata
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 VERSION = re.search(r'VERSION\s*=\s*"([^"]+)"', open(os.path.join(ROOT, "starmoe_ios", "gui", "__init__.py"), encoding="utf-8").read()).group(1)
@@ -18,7 +18,9 @@ for pkg in ("pymobiledevice3",):
     d, b, h = collect_all(pkg)
     datas += d; binaries += b; hiddenimports += h
 hiddenimports += collect_submodules("keyring.backends")
-hiddenimports += ["iphone_backup_decrypt"]
+hiddenimports += ["iphone_backup_decrypt", "certifi", "truststore"]
+# cacert.pem 不是 Python 模块。不收进包的话，冻结后的 keyfetch/OAuth 会 CERTIFICATE_VERIFY_FAILED。
+datas += collect_data_files("certifi")
 for dist in ("keyring", "pymobiledevice3"):   # entry points / 版本号依赖 dist-info
     try:
         datas += copy_metadata(dist)
@@ -26,6 +28,14 @@ for dist in ("keyring", "pymobiledevice3"):   # entry points / 版本号依赖 d
         pass
 if sys.platform == "win32":
     hiddenimports += ["win32ctypes.pywin32", "win32ctypes.pywin32.win32cred", "win32ctypes.core"]
+    # 自由线程构建（3.13t / 3.15 的 abi3t wheel）依赖 python3t.dll，PyInstaller 解析不到，
+    # cryptography._rust 在冻结后的进程里会 DLL load failed。打包必须用带 GIL 的 CPython。
+    if "t" in getattr(sys, "abiflags", ""):
+        raise SystemExit("打包不支持自由线程 Python（abiflags 含 t）。请用常规 CPython 3.12。")
+    for name in ("python3.dll", "vcruntime140.dll", "vcruntime140_1.dll"):
+        src = os.path.join(sys.base_prefix, name)
+        if os.path.isfile(src):
+            binaries.append((src, "."))
 
 excludes = ["tkinter", "matplotlib", "IPython", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.Qt3DCore",
             "PySide6.QtQuick", "PySide6.QtQml", "PySide6.QtMultimedia", "PySide6.QtPdf"]
