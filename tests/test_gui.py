@@ -57,6 +57,10 @@ def make_runner(plan, calls):
         if step == "prepare_timeout":
             stats.received = 0
             raise TimeoutError("snapshot")
+        if step == "finalize_timeout":
+            stats.phase = "finalizing"
+            stats.received = 5000
+            raise TimeoutError("moving")
         if step == "deny":
             raise StarMoeError("ERR_BACKUP_DENIED", "denied")
         if step in ("save_drop", "ok"):
@@ -412,4 +416,84 @@ finally:
     QApplication.alert = real_alert
 assert alerts and alerts[-1] == "notify"
 print("PASSCODE BANNER OK")
+
+# 17) 整理阶段的读超时不是断线
+calls = []
+w, ev, loop = run_worker(make_runner(["finalize_timeout", "ok"], calls))
+finish(loop, w)
+assert calls == ["finalize_timeout", "ok"] and ev["retrying"] == [] and ev["found"], (calls, ev)
+print("FINALIZE WAIT OK")
+
+# 18) 整理阶段 UI：条目数而不是 0 B/s；锁屏横幅在没有新字节时保留
+page3 = ExtractPage()
+page3.update_stats(99, 5000, 171, 0, 900, "finalizing", now=3_000_000, finalize_items=900_000)
+assert page3.state.text() == "正在整理文件，请保持连接（不要拔线）"
+assert page3.t_speed.v.text() == "900000 项"
+assert page3.t_speed._title.text() == "已整理"
+assert "B/s" not in page3.t_speed.v.text()
+page3.set_passcode(True)
+page3.update_stats(99, 5000, 171, 0, 901, "finalizing", now=3_000_001, finalize_items=900_100)
+assert not page3.passcode.isHidden()
+page3.update_stats(99, 5000 + 10, 171, 0, 902, "transferring", now=3_000_002)
+assert page3.passcode.isHidden()
+assert page3.t_speed._title.text() == "速度"
+print("FINALIZE UI OK")
+
+# 19) 不创建占位文件；move/remove 命中这些名字时不访问磁盘。Manifest 计数。
+import asyncio, sqlite3
+from pathlib import Path
+from starmoe_ios.backupfast import placeholder_bypass
+from starmoe_ios.device import count_target_entries, file_matches
+
+class _BF:
+    def __init__(self, **kw):
+        self.device_name = kw.get("device_name")
+        self.domain = kw.get("domain")
+        self.relative_path = kw.get("relative_path")
+
+doms = ["AppDomain-com.bilibili.sirius"]
+assert file_matches(_BF(domain="AppDomain-com.bilibili.sirius", relative_path="Documents/a"), doms, [])
+assert file_matches(_BF(device_name="AppDomain-com.bilibili.sirius-Documents/a"), doms, [])
+assert not file_matches(_BF(domain="CameraRollDomain", relative_path="a"), doms, [])
+
+class _DL:
+    def __init__(self):
+        self.moved = None
+        self.removed = None
+        self.status = None
+    async def move_items(self, message):
+        self.moved = message
+    async def remove_items(self, message):
+        self.removed = message
+    async def status_response(self, code, *a, **k):
+        self.status = code
+
+st = type("S", (), {"phase": "", "finalize_items": 0})()
+dl = _DL()
+blob = "ab" * 20
+real = Path(tempfile.mkdtemp()) / "Manifest.plist"
+with placeholder_bypass(st, _DL):
+    missing = Path(tempfile.mkdtemp()) / blob
+    missing.touch()
+    assert not missing.exists()
+    real.touch()
+    assert real.is_file()
+    asyncio.run(dl.move_items(["DLMessageMoveItems", {blob: "UDID/" + blob}, None, 99]))
+    assert dl.moved is None and dl.status == 0 and st.phase == "finalizing" and st.finalize_items == 1
+    dl.status = None
+    asyncio.run(dl.remove_items(["DLMessageRemoveItems", ["UDID/" + blob]]))
+    assert dl.removed is None and dl.status == 0 and st.finalize_items == 2
+    dl.status = None
+    asyncio.run(dl.move_items(["DLMessageMoveItems", {"Info.plist": "UDID/Info.plist"}]))
+    assert dl.moved is not None and dl.moved[1] == {"Info.plist": "UDID/Info.plist"}
+
+dbdir = Path(tempfile.mkdtemp())
+con = sqlite3.connect(dbdir / "Manifest.db")
+con.execute("CREATE TABLE Files (fileID TEXT, domain TEXT, relativePath TEXT, flags INT, file BLOB)")
+for i in range(171):
+    con.execute("INSERT INTO Files VALUES (?,?,?,?,?)", (f"{i:040x}", "AppDomain-com.bilibili.sirius", f"d/{i}", 1, b""))
+con.execute("INSERT INTO Files VALUES (?,?,?,?,?)", ("ff" * 20, "CameraRollDomain", "a", 1, b""))
+con.commit(); con.close()
+assert count_target_entries(dbdir, doms) == 171
+print("PLACEHOLDER OK")
 print("GUI TESTS OK")

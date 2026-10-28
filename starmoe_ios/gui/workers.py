@@ -146,6 +146,10 @@ class BackupWorker(QThread):
                     self.stats.phase = "preparing"
                     log.info("手机仍在准备备份（尚无数据），继续等待，不记为断线：%r", e)
                     continue
+                # 结束阶段在搬/删临时文件，可能很久没有新字节，不是断线
+                if device.is_idle_timeout(e) and self.stats.phase == "finalizing":
+                    log.info("整理文件时读超时，继续，不记为断线：%r", e)
+                    continue
                 preparing_gave_up = (device.is_idle_timeout(e) and self.stats.received == 0
                                      and time.time() - self.stats.started >= PREPARE_WAIT_S)
                 retryable = preparing_gave_up or device.is_disconnect(e) or (

@@ -108,6 +108,8 @@ def main():
     x.set_passcode(True)
     shot("03d_passcode")
     x.set_passcode(False)
+    x.update_stats(99, base + 41_000_000 * 30, 171, 12_400_000, 1800, "finalizing", now=now + 60, finalize_items=900_000)
+    shot("03e_finalizing")
     x.show_error("ERR_BACKUP_DENIED", None)
     shot("03c_extract_error")
 

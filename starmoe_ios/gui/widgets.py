@@ -322,7 +322,8 @@ class StatTile(Card):
         super().__init__("tile", (14, 12, 14, 12), 6)
         self.setMinimumWidth(0)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.lay.addWidget(hbox(icon_label(icon_name, T.PURPLE, 14), label(title, "small"), None, spacing=6))
+        self._title = label(title, "small")
+        self.lay.addWidget(hbox(icon_label(icon_name, T.PURPLE, 14), self._title, None, spacing=6))
         self.v = label(value, "stat")
         self.v.setMinimumWidth(0)
         self.v.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -332,6 +333,9 @@ class StatTile(Card):
     def set(self, v):
         self._full = str(v)
         self._fit()
+
+    def set_title(self, text):
+        self._title.setText(text)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

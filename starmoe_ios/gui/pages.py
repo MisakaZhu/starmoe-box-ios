@@ -527,12 +527,21 @@ class ExtractPage(Page):
         if self.bar.maximum() == 0:
             self.bar.setRange(0, 1000)
 
-    def update_stats(self, percent, received, kept, kept_bytes, elapsed, phase, now=None):
+    def update_stats(self, percent, received, kept, kept_bytes, elapsed, phase, now=None, finalize_items=0):
         now = time.time() if now is None else now
         active = phase == "transferring" and received > 0
         self._speed = self._rate.observe(now, received, active)
         p = max(0.0, min(100.0, percent))
-        if phase in ("preparing", "waiting_device") and received <= 0:
+        if phase == "finalizing":
+            self._determinate()
+            self.pct.setText(f"{p:.0f}%")
+            self.bar.setValue(int(p * 10) if p else 990)
+            self.state.setText("正在整理文件，请保持连接（不要拔线）")
+            self.eta.setText("")
+            self.note.setText("游戏文件已经收到。正在移动或删除其余临时文件，请不要拔线。")
+            self.t_speed.set_title("已整理")
+            self.t_speed.set(f"{finalize_items} 项")
+        elif phase in ("preparing", "waiting_device") and received <= 0:
             self.bar.setRange(0, 0)
             self.pct.setText("…")
             self.state.setText("手机正在准备备份数据，第一次可能需要 5–10 分钟，请保持亮屏")
@@ -557,7 +566,9 @@ class ExtractPage(Page):
         self._seen = received
         self.t_recv.set(human_bytes(received))
         self.t_kept.set(f"{kept} 个")
-        self.t_speed.set(f"{human_bytes(self._speed)}/s" if self._speed > 0 else "—")
+        if phase != "finalizing":
+            self.t_speed.set_title("速度")
+            self.t_speed.set(f"{human_bytes(self._speed)}/s" if self._speed > 0 else "—")
         self.t_time.set(mmss(elapsed))
         if kept_bytes:
             self.kept_title.setText(f"仅保存游戏数据，占用约 {human_bytes(kept_bytes)}")

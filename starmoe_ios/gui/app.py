@@ -421,7 +421,8 @@ class MainWindow(QMainWindow):
             return
         s = w.stats
         page = self.p[self.X]
-        page.update_stats(s.percent, s.received, s.kept, s.kept_bytes, time.time() - s.started, s.phase)
+        page.update_stats(s.percent, s.received, s.kept, s.kept_bytes, time.time() - s.started, s.phase,
+                          finalize_items=s.finalize_items)
         page.set_passcode(bool(s.passcode_needed))
         if s.passcode_needed and not self._passcode_alerted:
             self._passcode_alerted = True

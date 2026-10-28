@@ -9,7 +9,7 @@
    - 若设备开启了“加密本地备份”，收到的文件和 Manifest.db 都是加密的；需要备份密码才能 scan。
    - USB 上仍要传输整机数据，1TB 手机可能需要数小时；只占用很少磁盘。
 """
-import asyncio, logging, os, shutil, time
+import asyncio, logging, os, shutil, sqlite3, time
 from pathlib import Path
 from .errors import (StarMoeError, ERR_NO_DEVICE, ERR_NOT_TRUSTED, ERR_NOT_INSTALLED, ERR_DISK,
                      ERR_BACKUP_DENIED, ERR_DISCONNECTED)
@@ -148,6 +148,8 @@ class BackupStats:
         self.will_encrypt = None
         self.udid_dir = None
         self.passcode_needed = False   # pymobiledevice3：手机锁屏，等用户输入锁屏密码
+        self.finalize_items = 0        # 结束阶段已处理的 move/remove 条数
+        self.target_domains = ()
 
 
 class PasscodeLogHandler(logging.Handler):
@@ -164,6 +166,47 @@ class PasscodeLogHandler(logging.Handler):
             return
         if "passcode" in msg.lower():
             self.stats.passcode_needed = True
+
+
+def file_matches(bf, domains, containers):
+    """上传路径或 Manifest 的 domain 命中目标 App / App Group 即保留。"""
+    dn = getattr(bf, "device_name", None) or ""
+    domain = getattr(bf, "domain", None) or ""
+    rel = getattr(bf, "relative_path", None) or ""
+    blob = "\n".join(x for x in (dn, domain, rel) if x)
+    n = _norm(dn)
+    if any(d and d in blob for d in domains):
+        return True
+    return any(n == c or (c and n.startswith(c + "/")) for c in containers)
+
+
+def count_target_entries(device_dir, domains):
+    """Manifest.db 里属于目标 App 域的文件数。读不到（还没写完或已加密）时返回 None。"""
+    if not device_dir or not domains:
+        return None
+    db = Path(device_dir) / "Manifest.db"
+    try:
+        if not db.is_file() or db.stat().st_size == 0:
+            return None
+    except OSError:
+        return None
+    wanted = tuple(domains)
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    except sqlite3.Error:
+        return None
+    try:
+        try:
+            rows = con.execute("SELECT domain FROM Files")
+        except sqlite3.Error:
+            return None
+        n = 0
+        for (domain,) in rows:
+            if domain and any(domain == d or domain.startswith(d + "-") or d in domain for d in wanted):
+                n += 1
+        return n
+    finally:
+        con.close()
 
 
 def _folder_bytes(path):
@@ -200,15 +243,14 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
     containers += [_norm(v) for v in (info.get("GroupContainers") or {}).values()]
     domains = ["AppDomain-" + bundle] + ["AppDomainGroup-" + g for g in (info.get("GroupContainers") or {})]
     say(f"目标域: {domains}")
+    stats.target_domains = tuple(domains)
     stats.udid_dir = out_dir / ld.udid
 
     def keep(bf):
-        dn = bf.device_name or ""
-        n = _norm(dn)
-        ok = any(n == c or n.startswith(c + "/") for c in containers) or any(d in dn for d in domains)
+        ok = file_matches(bf, domains, containers)
         if ok:
             stats.kept += 1
-            log.debug("保留 %s", dn)
+            log.debug("保留 %s", getattr(bf, "device_name", None) or getattr(bf, "domain", None))
         else:
             stats.dropped += 1
         return ok
@@ -244,6 +286,9 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
             if stats.udid_dir and now - last_walk >= 2.0:
                 last_walk = now
                 stats.kept_bytes = _folder_bytes(stats.udid_dir)
+                found = count_target_entries(stats.udid_dir, stats.target_domains)
+                if found is not None:
+                    stats.kept = max(stats.kept, found)
             if on_tick:
                 on_tick()
 
@@ -259,7 +304,11 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
             say(f"手机开启了备份加密: {enc}")
             stats.phase = "preparing"   # 手机先做快照，可能 5–10 分钟都是 0 字节
             try:
-                await mb.backup(full=full, backup_directory=out_dir, progress_callback=progress, filter_callback=keep)
+                from pymobiledevice3.services.device_link import DeviceLink
+                from .backupfast import placeholder_bypass
+                with placeholder_bypass(stats, DeviceLink):
+                    await mb.backup(full=full, backup_directory=out_dir, progress_callback=progress,
+                                    filter_callback=keep)
             except Exception as e:
                 if is_disconnect(e) or isinstance(e, asyncio.CancelledError):
                     raise
