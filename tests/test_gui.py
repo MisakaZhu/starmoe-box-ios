@@ -347,4 +347,37 @@ assert picked == ["intl"] and seg.value() == "intl"
 seg.set_value("intl")
 assert picked == ["intl"]
 print("SERVER SEGMENT OK")
+
+# 14) 速度卡片在默认内容宽度里放下「84.5 MB/s」，四张卡等宽
+from PySide6.QtWidgets import QWidget, QHBoxLayout
+from starmoe_ios.gui.widgets import StatTile
+box = QWidget()
+box.resize(698, 100)   # 960 窗口减去 210 侧栏和页边距
+row = QHBoxLayout(box)
+row.setContentsMargins(0, 0, 0, 0)
+row.setSpacing(12)
+cards = [StatTile("download", "已接收", "17.7 GB"), StatTile("json", "已保留游戏文件", "12 个"),
+         StatTile("refresh", "速度", "84.5 MB/s"), StatTile("clock", "已用时间", "10:48")]
+for c in cards:
+    row.addWidget(c, 1)
+box.show()
+spin()
+assert "MB/s" in cards[2].v.text(), cards[2].v.text()
+widths = [c.width() for c in cards]
+assert max(widths) - min(widths) <= 4, widths
+print("STAT TILE OK", cards[2].v.text(), widths)
+
+# 15) 防休眠调用成对出现
+import starmoe_ios.power as power
+marks = []
+real_begin, real_end = power.begin, power.end
+power.begin = lambda reason: marks.append(reason) or "tok"
+power.end = lambda token: marks.append(token)
+try:
+    with power.StayAwake("extracting"):
+        pass
+finally:
+    power.begin, power.end = real_begin, real_end
+assert marks == ["extracting", "tok"], marks
+print("STAY AWAKE OK")
 print("GUI TESTS OK")

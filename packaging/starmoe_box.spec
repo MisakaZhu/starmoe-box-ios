@@ -72,6 +72,9 @@ else:
                          "CFBundleURLTypes": [{"CFBundleURLName": SCHEME, "CFBundleTypeRole": "Viewer",
                                                "CFBundleURLSchemes": [SCHEME]}],
                          "NSHighResolutionCapable": True,
+                         # 窗口被挡住时 App Nap 会把备份线程降到十几 MB/s
+                         "NSAppSleepDisabled": True,
+                         "LSAppNapIsDisabled": True,
                          "LSMinimumSystemVersion": "11.0",
                          "LSApplicationCategoryType": "public.app-category.utilities",
                          "NSHumanReadableCopyright": "Apache License 2.0 · 非官方工具",

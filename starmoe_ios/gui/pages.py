@@ -462,7 +462,7 @@ class ExtractPage(Page):
         self.t_speed = StatTile("refresh", "速度", "—")
         self.t_time = StatTile("clock", "已用时间", "00:00")
         for t in (self.t_recv, self.t_kept, self.t_speed, self.t_time):
-            tiles.addWidget(t)
+            tiles.addWidget(t, 1)
         self.body.addLayout(tiles)
         ban = Card("purple", (18, 14, 18, 14), 14, horizontal=True)
         ban.lay.addWidget(IconBadge("shield", "#FFFFFF", T.PURPLE, 42, 22, 12))

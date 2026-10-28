@@ -316,14 +316,45 @@ class Stepper(QWidget):
 
 
 class StatTile(Card):
+    """四张等宽统计卡。数值从 20px 往下缩，仍放不下才省略，避免「84.5 MB/s」被裁成「84.5 MB/」。"""
+
     def __init__(self, icon_name, title, value="—"):
-        super().__init__("tile", (16, 14, 16, 14), 6)
+        super().__init__("tile", (14, 12, 14, 12), 6)
+        self.setMinimumWidth(0)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.lay.addWidget(hbox(icon_label(icon_name, T.PURPLE, 14), label(title, "small"), None, spacing=6))
-        self.v = label(value, "big")
+        self.v = label(value, "stat")
+        self.v.setMinimumWidth(0)
+        self.v.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.lay.addWidget(self.v)
+        self._full = str(value)
 
     def set(self, v):
-        self.v.setText(str(v))
+        self._full = str(v)
+        self._fit()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit()
+
+    def _fit(self):
+        from PySide6.QtGui import QFontMetrics
+        text = self._full
+        avail = self.v.width()
+        if avail < 8:
+            avail = max(8, self.width() - 28)
+        size = 20
+        shown = text
+        while size >= 14:
+            self.v.setStyleSheet(f"font-size: {size}px; font-weight: 700; color: {T.TEXT};")
+            width = QFontMetrics(self.v.font()).horizontalAdvance(text)
+            if width <= avail:
+                self.v.setText(text)
+                return
+            size -= 1
+        self.v.setStyleSheet(f"font-size: 14px; font-weight: 700; color: {T.TEXT};")
+        shown = QFontMetrics(self.v.font()).elidedText(text, Qt.ElideRight, avail)
+        self.v.setText(shown)
 
 
 class Option(Card):

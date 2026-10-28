@@ -71,8 +71,6 @@ class MainWindow(QMainWindow):
 
         self.poll = QTimer(self)
         self.poll.timeout.connect(self.poll_device)
-        self.ui_timer = QTimer(self)
-        self.ui_timer.timeout.connect(self.refresh_extract)
 
         self.set_server(self.server)
         self.load_saved_keys()
@@ -393,23 +391,19 @@ class MainWindow(QMainWindow):
         w.found.connect(lambda s: self.on_found(s, "USB 过滤备份", str(w.stats.udid_dir)))
         w.failed.connect(self.on_backup_failed)
         w.cancelled.connect(lambda: self.go(self.D))
-        w.finished.connect(self.ui_timer.stop)
+        w.tick.connect(self.refresh_extract)
+        w.finished.connect(self.refresh_extract)
         self.backup_password = pw
         self.p[self.X].reset()
         self.go(self.X)
         w.start()
-        self.ui_timer.start(500)
-        self._kept_bytes_at = 0
 
     def refresh_extract(self):
         w = self.worker
         if not w:
             return
         s = w.stats
-        if time.time() - self._kept_bytes_at > 2 and s.udid_dir and os.path.isdir(s.udid_dir):
-            self._kept_bytes_at = time.time()
-            w.kept_bytes = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(s.udid_dir) for f in fs)
-        self.p[self.X].update_stats(s.percent, s.received, s.kept, w.kept_bytes, time.time() - s.started, s.phase)
+        self.p[self.X].update_stats(s.percent, s.received, s.kept, s.kept_bytes, time.time() - s.started, s.phase)
 
     def cancel_backup(self):
         if self.busy() and QMessageBox.question(

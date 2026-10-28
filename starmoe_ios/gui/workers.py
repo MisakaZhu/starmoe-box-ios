@@ -3,6 +3,7 @@ import asyncio, logging, os, shutil, time, traceback
 from PySide6.QtCore import QThread, Signal
 from .. import core, device
 from ..errors import StarMoeError, ERR_DISCONNECTED, ERR_NO_DEVICE, ERR_NOT_TRUSTED, ERR_NETWORK
+from ..power import StayAwake
 
 log = logging.getLogger("starmoe.gui")
 # 快照阶段没有字节也不当断线；超过这个时间仍是 0 字节，才按断线重试
@@ -44,6 +45,7 @@ class BackupWorker(QThread):
     信号：status(str) 文字状态；retrying(n, max)；scanning()；found(list)；failed(code, msg, detail)；cancelled()
     """
     status = Signal(str)
+    tick = Signal()          # 最多约 10 次/秒，只通知界面去读 stats
     retrying = Signal(int, int)
     scanning = Signal()
     found = Signal(object)
@@ -73,7 +75,8 @@ class BackupWorker(QThread):
     def _once(self):
         async def main():
             self._task = asyncio.current_task()
-            return await self.runner(self.bundle, self.out_dir, self.stats, on_log=lambda m: log.info(m))
+            return await self.runner(self.bundle, self.out_dir, self.stats, on_log=lambda m: log.info(m),
+                                     on_tick=self.tick.emit)
         self._loop = asyncio.new_event_loop()
         try:
             return self._loop.run_until_complete(main())
@@ -92,11 +95,18 @@ class BackupWorker(QThread):
             return None
 
     def _wait_device(self):
+        def nap(seconds):
+            end_at = time.time() + seconds
+            while time.time() < end_at:
+                if self._cancel:
+                    return
+                self.tick.emit()
+                time.sleep(0.1)
+
         t0 = time.time()
-        for _ in range(20):   # 先等 2 秒，让 usbmuxd 注意到断开
-            if self._cancel:
-                return False
-            time.sleep(0.1)
+        nap(2)   # 先等 2 秒，让 usbmuxd 注意到断开
+        if self._cancel:
+            return False
         while not self._cancel and time.time() - t0 < self.wait_device_s:
             try:
                 if asyncio.run(device.list_serials()):
@@ -105,10 +115,14 @@ class BackupWorker(QThread):
                 pass
             except Exception:
                 pass
-            time.sleep(3)
+            nap(3)
         return False
 
     def run(self):
+        with StayAwake("StarMoe Box is extracting an iPhone backup"):
+            self._run()
+
+    def _run(self):
         # 只在第一次尝试前清理旧数据；重试时保留已收到的游戏文件
         shutil.rmtree(self.out_dir, ignore_errors=True)
         os.makedirs(self.out_dir, exist_ok=True)

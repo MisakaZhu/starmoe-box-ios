@@ -54,6 +54,7 @@ QLabel[role="muted"] {{ color: {MUTED}; font-size: 12px; }}
 QLabel[role="small"] {{ color: {TEXT2}; font-size: 12px; }}
 QLabel[role="cardtitle"] {{ font-size: 14px; font-weight: 600; }}
 QLabel[role="big"] {{ font-size: 26px; font-weight: 700; }}
+QLabel[role="stat"] {{ font-size: 20px; font-weight: 700; }}
 QLabel[role="huge"] {{ font-size: 34px; font-weight: 700; color: {PURPLE_DARK}; }}
 QLabel[role="value"] {{ font-size: 14px; font-weight: 600; }}
 QLabel[chip="green"] {{ background: {GREEN_BG}; color: {GREEN}; border-radius: 10px; padding: 2px 9px; font-size: 12px; }}

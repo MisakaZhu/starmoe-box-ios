@@ -142,13 +142,25 @@ class BackupStats:
         self.kept = 0          # 保留（写盘）的游戏文件数
         self.dropped = 0
         self.percent = 0.0     # 手机报告的进度
+        self.kept_bytes = 0
         self.started = time.time()
         self.phase = "connecting"   # connecting / preparing / transferring / finishing
         self.will_encrypt = None
         self.udid_dir = None
 
 
-async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, full=True, on_log=None):
+def _folder_bytes(path):
+    total = 0
+    for root, _, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, full=True, on_log=None, on_tick=None):
     """执行一次过滤备份。返回 (udid_dir, will_encrypt)。异常：StarMoeError 或原始连接异常（见 is_disconnect）。"""
     from pymobiledevice3.services.mobilebackup2 import Mobilebackup2Service
     from pymobiledevice3.services import device_link as dlmod
@@ -204,8 +216,21 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
         except (TypeError, ValueError):
             pass
 
+    async def pulse():
+        """界面刷新最多 10 次/秒。目录大小在这条备份线程里算，不占用 GUI。"""
+        last_walk = 0.0
+        while True:
+            await asyncio.sleep(0.1)
+            now = time.monotonic()
+            if stats.udid_dir and now - last_walk >= 2.0:
+                last_walk = now
+                stats.kept_bytes = _folder_bytes(stats.udid_dir)
+            if on_tick:
+                on_tick()
+
     dlmod.DeviceLink.get_free_disk_space = fake_free_space
     dlmod.DeviceLink._recvall = counting_recv
+    pulse_task = asyncio.ensure_future(pulse())
     try:
         async with Mobilebackup2Service(ld) as mb:
             stats.will_encrypt = enc = await mb.get_will_encrypt()
@@ -222,6 +247,11 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
                 else:
                     raise StarMoeError(ERR_BACKUP_DENIED, "iPhone 拒绝了备份请求。", repr(e))
     finally:
+        pulse_task.cancel()
+        try:
+            await pulse_task
+        except asyncio.CancelledError:
+            pass
         dlmod.DeviceLink.get_free_disk_space = orig_free
         dlmod.DeviceLink._recvall = orig_recv
         try:
