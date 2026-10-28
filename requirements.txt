@@ -1,5 +1,7 @@
 iphone_backup_decrypt>=0.9
-pymobiledevice3>=11.43,<12   # USB 功能（probe-usb / filtered-backup）需要；已验证可在 Python 3.9 上安装导入
+# 11.43.1–11.45 上传时 filter 只收到 BackupFile(file_name, device_name)，domain 为空。
+# CLI 的 scan 读的是已有备份，不走这个过滤；GUI 和 filtered-backup 共用 keep()。
+pymobiledevice3>=11.43.1,<11.46
 # 49+ 不再发布 macOS x86_64 wheel。在 Intel 上源码构建会动态链接 Homebrew OpenSSL 3，
 # 运行时和 sslpsk-pmd3 自带的 libcrypto.3.dylib 撞名（缺 EVP_DigestSqueeze）。48.x 的 universal2 wheel 静态链接 OpenSSL。
 cryptography>=43,<49

@@ -63,9 +63,14 @@ jobs:
           APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
         run: bash packaging/build_mac.sh
       - name: 检查架构
+        if: always()
         run: test "$(lipo -archs 'dist/StarMoe Box.app/Contents/MacOS/StarMoeBox')" = "$([ ${{ matrix.arch }} = arm64 ] && echo arm64 || echo x86_64)"
       - uses: actions/upload-artifact@v4
-        with: { name: "StarMoeBox-mac-${{ matrix.arch }}", path: "dist/StarMoeBox-mac-${{ matrix.arch }}.dmg" }
+        if: always()
+        with:
+          name: "StarMoeBox-mac-${{ matrix.arch }}"
+          path: "dist/StarMoeBox-mac-${{ matrix.arch }}.dmg"
+          if-no-files-found: warn
 
   windows:
     needs: test

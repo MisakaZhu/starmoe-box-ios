@@ -9,7 +9,7 @@
    - 若设备开启了“加密本地备份”，收到的文件和 Manifest.db 都是加密的；需要备份密码才能 scan。
    - USB 上仍要传输整机数据，1TB 手机可能需要数小时；只占用很少磁盘。
 """
-import asyncio, logging, os, shutil, sqlite3, time
+import asyncio, logging, os, re, shutil, sqlite3, time
 from pathlib import Path
 from .errors import (StarMoeError, ERR_NO_DEVICE, ERR_NOT_TRUSTED, ERR_NOT_INSTALLED, ERR_DISK,
                      ERR_BACKUP_DENIED, ERR_DISCONNECTED)
@@ -168,16 +168,61 @@ class PasscodeLogHandler(logging.Handler):
             self.stats.passcode_needed = True
 
 
-def file_matches(bf, domains, containers):
-    """上传路径或 Manifest 的 domain 命中目标 App / App Group 即保留。"""
-    dn = getattr(bf, "device_name", None) or ""
-    domain = getattr(bf, "domain", None) or ""
-    rel = getattr(bf, "relative_path", None) or ""
+_UUID_RE = re.compile(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}")
+
+
+def canon_path(p):
+    """去掉 /private 前缀、重复斜杠和结尾斜杠，让 /var 与 /private/var 对得上。"""
+    if not p:
+        return ""
+    p = str(p).replace("\\", "/").strip()
+    if p.startswith("/private/"):
+        p = p[len("/private"):]
+    while "//" in p:
+        p = p.replace("//", "/")
+    if len(p) > 1:
+        p = p.rstrip("/")
+    return p
+
+
+def file_matches(bf, domains, containers, bundle=None):
+    """两种调用都要认。
+
+    pymobiledevice3 11.43.1 上传时只传 BackupFile(file_name, device_name)，domain 是 None。
+    device_name 常见两种：
+      AppDomain-<bundle>-Documents/x 或 AppDomain-<bundle>/Documents/x
+      /var/mobile/Containers/Data/Application/<UUID>/Documents/x
+      （也可能带 /private 前缀）
+    只有 patch_manifest=True 时才会再以 BackupFile(file_id, domain, relative_path) 调用，那时 device_name 是 None。
+    """
+    if isinstance(bf, str):
+        dn, domain, rel = bf, "", ""
+    else:
+        dn = getattr(bf, "device_name", None) or ""
+        domain = getattr(bf, "domain", None) or ""
+        rel = getattr(bf, "relative_path", None) or ""
+    domains = [d for d in (domains or []) if d]
     blob = "\n".join(x for x in (dn, domain, rel) if x)
-    n = _norm(dn)
-    if any(d and d in blob for d in domains):
-        return True
-    return any(n == c or (c and n.startswith(c + "/")) for c in containers)
+    for d in domains:
+        if domain == d or domain.startswith(d + "-") or domain.startswith(d + "/"):
+            return True
+        if d in blob:
+            return True
+    if bundle:
+        for pfx in (f"AppDomain-{bundle}", f"AppDomainPlugin-{bundle}"):
+            if domain == pfx or domain.startswith(pfx + ".") or domain.startswith(pfx + "-") or domain.startswith(pfx + "/"):
+                return True
+            if pfx in blob:
+                return True
+    cn = canon_path(dn)
+    for c in containers or []:
+        cc = canon_path(c)
+        if cc and (cn == cc or cn.startswith(cc + "/")):
+            return True
+        for u in _UUID_RE.findall(c or ""):
+            if u.lower() in (dn or "").lower():
+                return True
+    return False
 
 
 def count_target_entries(device_dir, domains):
@@ -243,14 +288,27 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
     containers += [_norm(v) for v in (info.get("GroupContainers") or {}).values()]
     domains = ["AppDomain-" + bundle] + ["AppDomainGroup-" + g for g in (info.get("GroupContainers") or {})]
     say(f"目标域: {domains}")
+    say(f"容器路径: {containers}")
     stats.target_domains = tuple(domains)
+    stats.containers = tuple(containers)
+    stats.seen_device_names = []
+    stats.matched_examples = []
     stats.udid_dir = out_dir / ld.udid
 
     def keep(bf):
-        ok = file_matches(bf, domains, containers)
+        dn = "" if isinstance(bf, str) else (getattr(bf, "device_name", None) or "")
+        if dn and len(stats.seen_device_names) < 30:
+            stats.seen_device_names.append(dn)
+            log.info("device_name[%d]: %s", len(stats.seen_device_names), dn)
+        ok = file_matches(bf, domains, containers, bundle)
         if ok:
             stats.kept += 1
-            log.debug("保留 %s", getattr(bf, "device_name", None) or getattr(bf, "domain", None))
+            label = dn or (getattr(bf, "domain", None) or "")
+            if len(stats.matched_examples) < 8:
+                stats.matched_examples.append(label)
+                log.info("保留 #%d %s", stats.kept, label)
+            elif stats.kept in (10, 50, 100) or stats.kept % 100 == 0:
+                log.info("已保留 %d 个游戏文件", stats.kept)
         else:
             stats.dropped += 1
         return ok
@@ -307,8 +365,10 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
                 from pymobiledevice3.services.device_link import DeviceLink
                 from .backupfast import placeholder_bypass
                 with placeholder_bypass(stats, DeviceLink):
+                    # patch_manifest 默认就是 False。显式关掉：11.43.1 只在为 True 时才会
+                    # 用 domain/relative_path 再调一次 filter 并删掉 Manifest 行。
                     await mb.backup(full=full, backup_directory=out_dir, progress_callback=progress,
-                                    filter_callback=keep)
+                                    filter_callback=keep, patch_manifest=False)
             except Exception as e:
                 if is_disconnect(e) or isinstance(e, asyncio.CancelledError):
                     raise

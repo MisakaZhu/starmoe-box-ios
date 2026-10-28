@@ -2,7 +2,7 @@
 import asyncio, logging, os, shutil, time, traceback
 from PySide6.QtCore import QThread, Signal
 from .. import core, device
-from ..errors import StarMoeError, ERR_DISCONNECTED, ERR_NO_DEVICE, ERR_NOT_TRUSTED, ERR_NETWORK
+from ..errors import StarMoeError, ERR_DISCONNECTED, ERR_NO_DEVICE, ERR_NOT_TRUSTED, ERR_NETWORK, ERR_NO_SAVE
 from ..power import StayAwake
 
 log = logging.getLogger("starmoe.gui")
@@ -176,6 +176,15 @@ class BackupWorker(QThread):
                         self.failed.emit(ERR_DISCONNECTED, "连接中断后没有重新检测到 iPhone。", repr(e))
                     return
                 self.stats.percent = 0.0
+        if self.stats.kept == 0:
+            detail = (f"domains={list(getattr(self.stats, 'target_domains', ()))}; "
+                      f"containers={list(getattr(self.stats, 'containers', ()))}; "
+                      f"device_name_sample={list(getattr(self.stats, 'seen_device_names', ()))[:10]}")
+            log.error("备份结束但没有保留任何游戏文件。%s", detail)
+            self.failed.emit(ERR_NO_SAVE,
+                             "备份已经完成，但没有捕获到任何游戏文件。游戏数据被过滤掉了，磁盘上只会有 0 字节的占位文件。请把日志发给开发者。",
+                             detail)
+            return
         self.scanning.emit()
         try:
             saves = core.scan_path(self.codec, str(self.stats.udid_dir), self.server, self.password, log=log.info)

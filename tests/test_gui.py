@@ -61,6 +61,9 @@ def make_runner(plan, calls):
             stats.phase = "finalizing"
             stats.received = 5000
             raise TimeoutError("moving")
+        if step == "empty_ok":
+            stats.kept = 0
+            return stats.udid_dir, False
         if step == "deny":
             raise StarMoeError("ERR_BACKUP_DENIED", "denied")
         if step in ("save_drop", "ok"):
@@ -496,4 +499,32 @@ con.execute("INSERT INTO Files VALUES (?,?,?,?,?)", ("ff" * 20, "CameraRollDomai
 con.commit(); con.close()
 assert count_target_entries(dbdir, doms) == 171
 print("PLACEHOLDER OK")
+
+# 20) 11.43.1 上传时的 device_name，以及 Manifest 回调（device_name 为空）
+UUID = "8E5C3A21-1111-4222-8333-444455556666"
+container = f"/private/var/mobile/Containers/Data/Application/{UUID}/"
+dom = "AppDomain-com.bilibili.sirius"
+examples = [
+    f"/var/mobile/Containers/Data/Application/{UUID}/Documents/x",
+    f"/private/var/mobile/Containers/Data/Application/{UUID}/Documents/x/",
+    f"{dom}-Documents/x",
+    f"{dom}/Documents/x",
+    f"AppDomainPlugin-com.bilibili.sirius.widget-Library/x",
+]
+for name in examples:
+    assert file_matches(type("B", (), {"device_name": name, "domain": None, "relative_path": None})(),
+                        [dom], [container], "com.bilibili.sirius"), name
+# 只有 domain 的第二次调用（prune）
+assert file_matches(type("B", (), {"device_name": None, "domain": dom, "relative_path": "Documents/x"})(),
+                    [dom], [], "com.bilibili.sirius")
+assert not file_matches(type("B", (), {"device_name": "/var/mobile/Media/DCIM/a.jpg", "domain": None,
+                                       "relative_path": None})(), [dom], [container], "com.bilibili.sirius")
+print("DEVICE NAME MATCH OK")
+
+# 21) 备份结束但一个游戏文件都没留下 → 明确失败，不当成功
+calls = []
+w, ev, loop = run_worker(make_runner(["empty_ok"], calls))
+finish(loop, w)
+assert ev["failed"] == "ERR_NO_SAVE" and not ev["found"], ev
+print("EMPTY CAPTURE OK")
 print("GUI TESTS OK")

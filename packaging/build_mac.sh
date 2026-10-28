@@ -222,7 +222,7 @@ print("" if s<0 or e<s else json.loads(raw[s:e+1]).get("status",""))' 2>/dev/nul
     echo "==> notarytool log" >&2
     if [ -n "$id" ]; then xcrun notarytool log "$id" "${NOTARY[@]}" >&2 || true; fi
     printf '%s\n' "$out" >&2
-    exit 1
+    return 1
   fi
 }
 
@@ -230,10 +230,15 @@ DO_NOTARIZE=0
 if [ "$SIGNED" = 1 ] && [ ${#NOTARY[@]} -gt 0 ] && [ "${SKIP_NOTARIZE:-}" != "1" ]; then DO_NOTARIZE=1; fi
 if [ "$SIGNED" = 1 ] && [ ${#NOTARY[@]} -eq 0 ]; then echo "==> 已签名但未提供公证凭据，跳过公证"; fi
 
+NOTARY_FAILED=0
 if [ "$DO_NOTARIZE" = 1 ]; then   # 先公证 .app 并装订票据，这样拖出 DMG 后离线也能通过 Gatekeeper
   ditto -c -k --sequesterRsrc --keepParent "$APP" "$TMP/app.zip"
-  notarize "$TMP/app.zip"
-  xcrun stapler staple "$APP"
+  if notarize "$TMP/app.zip"; then
+    xcrun stapler staple "$APP" || NOTARY_FAILED=1
+  else
+    NOTARY_FAILED=1
+    echo "==> 公证失败，仍继续制作 DMG（已签名或 ad-hoc，未装订票据），便于立刻安装测试" >&2
+  fi
 fi
 
 # ---------------------------------------------------------------- DMG
@@ -266,16 +271,24 @@ if [ "$SIGNED" = 1 ]; then
   codesign --force --timestamp --sign "$IDENTITY" ${kc[@]+"${kc[@]}"} "$DMG"
   codesign --verify --strict --verbose=2 "$DMG"
 fi
-if [ "$DO_NOTARIZE" = 1 ]; then
-  notarize "$DMG"
-  xcrun stapler staple "$DMG"
-  xcrun stapler validate "$APP"
-  xcrun stapler validate "$DMG"
-  echo "==> Gatekeeper 校验"
-  codesign --verify --deep --strict --verbose=2 "$APP"
-  codesign --verify --strict --verbose=2 "$DMG"
-  spctl -a -vvv -t install "$APP"
-  spctl -a -vvv -t install "$DMG"
+if [ "$DO_NOTARIZE" = 1 ] && [ "$NOTARY_FAILED" = 0 ]; then
+  if notarize "$DMG"; then
+    xcrun stapler staple "$DMG"
+    xcrun stapler validate "$APP"
+    xcrun stapler validate "$DMG"
+    echo "==> Gatekeeper 校验"
+    codesign --verify --deep --strict --verbose=2 "$APP"
+    codesign --verify --strict --verbose=2 "$DMG"
+    spctl -a -vvv -t install "$APP"
+    spctl -a -vvv -t install "$DMG"
+  else
+    NOTARY_FAILED=1
+    echo "==> DMG 公证失败，仍保留未公证的 DMG" >&2
+  fi
 fi
 hdiutil verify "$DMG" >/dev/null
+if [ "$NOTARY_FAILED" = 1 ]; then
+  echo "完成：$DMG （已构建，公证失败，可直接安装测试）" >&2
+  exit 1
+fi
 echo "完成：$DMG （签名：$([ "$SIGNED" = 1 ] && echo Developer ID || echo 无)，公证：$([ "$DO_NOTARIZE" = 1 ] && echo 已公证 || echo 无)）"
