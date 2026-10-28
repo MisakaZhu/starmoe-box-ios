@@ -380,4 +380,36 @@ finally:
     power.begin, power.end = real_begin, real_end
 assert marks == ["extracting", "tok"], marks
 print("STAY AWAKE OK")
+
+# 16) 锁屏日志 → 醒目横幅；再次收到字节后收起。断线横幅同样在有新数据时收起。
+import logging
+from starmoe_ios.device import BackupStats, PasscodeLogHandler
+st = BackupStats()
+rec = logging.LogRecord("pymobiledevice3.services.mobilebackup2", logging.WARNING, __file__, 0,
+                        "Please enter the device passcode to continue the backup", (), None)
+PasscodeLogHandler(st).emit(rec)
+assert st.passcode_needed
+PasscodeLogHandler(st).emit(logging.LogRecord("pymobiledevice3.services.mobilebackup2", logging.WARNING,
+                                              __file__, 0, "something else", (), None))
+assert st.passcode_needed
+page2 = ExtractPage()
+page2.update_stats(99, 1000, 1, 0, 60, "transferring", now=2_000_000)
+page2.set_passcode(True)
+assert not page2.passcode.isHidden()
+labels = [w.text() for w in page2.passcode.findChildren(type(page2.state))]
+assert any("请解锁 iPhone 并输入锁屏密码，备份才会继续" in t for t in labels), labels
+page2.set_retrying(1, 5)
+assert not page2.retry.isHidden()
+page2.update_stats(99, 1000 + 50_000, 1, 0, 61, "transferring", now=2_000_001)
+assert page2.passcode.isHidden() and page2.retry.isHidden()
+alerts = []
+from starmoe_ios.gui.app import alert_passcode
+real_alert = QApplication.alert
+QApplication.alert = lambda *a, **k: alerts.append(a)
+try:
+    alert_passcode(page2, notify=lambda: alerts.append("notify"))
+finally:
+    QApplication.alert = real_alert
+assert alerts and alerts[-1] == "notify"
+print("PASSCODE BANNER OK")
 print("GUI TESTS OK")

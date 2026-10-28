@@ -147,6 +147,23 @@ class BackupStats:
         self.phase = "connecting"   # connecting / preparing / transferring / finishing
         self.will_encrypt = None
         self.udid_dir = None
+        self.passcode_needed = False   # pymobiledevice3：手机锁屏，等用户输入锁屏密码
+
+
+class PasscodeLogHandler(logging.Handler):
+    """pymobiledevice3 在锁屏时只打日志：Please enter the device passcode to continue the backup。"""
+
+    def __init__(self, stats):
+        super().__init__(logging.WARNING)
+        self.stats = stats
+
+    def emit(self, record):
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return
+        if "passcode" in msg.lower():
+            self.stats.passcode_needed = True
 
 
 def _folder_bytes(path):
@@ -206,6 +223,8 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
     async def counting_recv(self, size):
         b = await orig_recv(self, size)
         stats.received += len(b)
+        if b:
+            stats.passcode_needed = False   # 又有数据了，锁屏提示可以收起
         if stats.phase != "transferring":
             stats.phase = "transferring"
         return b
@@ -231,6 +250,9 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
     dlmod.DeviceLink.get_free_disk_space = fake_free_space
     dlmod.DeviceLink._recvall = counting_recv
     pulse_task = asyncio.ensure_future(pulse())
+    passcode_log = logging.getLogger("pymobiledevice3.services.mobilebackup2")
+    passcode_handler = PasscodeLogHandler(stats)
+    passcode_log.addHandler(passcode_handler)
     try:
         async with Mobilebackup2Service(ld) as mb:
             stats.will_encrypt = enc = await mb.get_will_encrypt()
@@ -252,6 +274,7 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
             await pulse_task
         except asyncio.CancelledError:
             pass
+        passcode_log.removeHandler(passcode_handler)
         dlmod.DeviceLink.get_free_disk_space = orig_free
         dlmod.DeviceLink._recvall = orig_recv
         try:

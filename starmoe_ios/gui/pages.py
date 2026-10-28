@@ -250,9 +250,10 @@ class DevicePage(Page):
         # 右侧检查清单
         tips = Card("card", (20, 18, 20, 18), 14)
         tips.lay.addWidget(label("连接前请确认", "cardtitle"))
-        for i, (t, s) in enumerate([("信任此电脑", "首次连接时，在 iPhone 弹窗中点击“信任”并输入锁屏密码。"),
-                                    ("保持 iPhone 解锁", "提取过程中请保持屏幕点亮且解锁。"),
-                                    ("关闭自动锁屏", "设置 › 显示与亮度 › 自动锁定 › 永不（完成后可改回）。")]):
+        for i, (t, s, emphasis) in enumerate([
+                ("信任此电脑", "首次连接时，在 iPhone 弹窗中点击“信任”并输入锁屏密码。", False),
+                ("保持 iPhone 解锁", "提取过程中请保持屏幕点亮且解锁。", False),
+                ("自动锁定请设为「永不」", "设置 › 显示与亮度 › 自动锁定 › 永不。锁屏后备份会停住，直到你解锁并输入锁屏密码。", True)]):
             n = label(str(i + 1))
             n.setAlignment(Qt.AlignCenter)
             n.setFixedSize(22, 22)
@@ -262,6 +263,10 @@ class DevicePage(Page):
             sl.setAlignment(Qt.AlignLeft)
             row_w = hbox(vbox(n, None), vbox(tl, sl, spacing=2), spacing=10)
             row_w.layout().setStretch(1, 1)
+            if emphasis:
+                n.setStyleSheet(f"background: {T.ORANGE}; color: white; border-radius: 11px; font-weight: 700;")
+                tl.setStyleSheet(f"color: {T.ORANGE}; font-weight: 700;")
+                row_w.setStyleSheet(f"background: {T.ORANGE_BG}; border-radius: 10px;")
             tips.lay.addWidget(row_w)
         tips.lay.addWidget(divider())
         tips.lay.addWidget(hbox(vbox(icon_label("info", T.BLUEINFO, 13), None),
@@ -478,8 +483,18 @@ class ExtractPage(Page):
                                       spacing=2), 1)
         self.retry.hide()
         self.body.addWidget(self.retry)
+        self.passcode = Card("orange", (18, 14, 18, 14), 6, horizontal=True)
+        self.passcode.lay.addWidget(IconBadge("lock", T.ORANGE, "#FFFFFF", 40, 20, 12))
+        self.passcode.lay.addWidget(vbox(
+            label("请解锁 iPhone 并输入锁屏密码，备份才会继续", "h2"),
+            label("手机锁屏后传输会停住。解锁并输入锁屏密码后，这里会自动消失。", "small", wrap=True),
+            spacing=2), 1)
+        self.passcode.hide()
+        self.body.insertWidget(1, self.passcode)
         self.body.addStretch(1)
-        self.footer.addWidget(hbox(icon_label("info", T.MUTED, 13), label("请不要拔线；手机最好设成“永不自动锁定”", "muted"), spacing=6))
+        self.footer.addWidget(hbox(icon_label("alert", T.ORANGE, 14),
+                                   label("开始前请把 iPhone「设置 › 显示与亮度 › 自动锁定」设为「永不」，否则锁屏后备份会停住", "value"),
+                                   spacing=6))
         self.footer.addStretch(1)
         self.btn_cancel = button("取消提取", None, "x")
         self.btn_cancel.clicked.connect(lambda: self.action.emit("cancel"))
@@ -492,6 +507,8 @@ class ExtractPage(Page):
     def reset(self):
         self.clear_error()
         self.retry.hide()
+        self.passcode.hide()
+        self._passcode_mark = 0
         self._determinate()
         self.bar.setValue(0)
         self.pct.setText("0%")
@@ -503,6 +520,7 @@ class ExtractPage(Page):
         self._speed = 0.0
         self._seen = 0
         self._banner_mark = 0
+        self._passcode_mark = 0
         self.update_stats(0, 0, 0, 0, 0, "connecting")
 
     def _determinate(self):
@@ -534,6 +552,8 @@ class ExtractPage(Page):
             self.note.setText("整机数据需要全部传一遍，只保留游戏文件" if active else "")
         if not self.retry.isHidden() and received > self._banner_mark:
             self.retry.hide()
+        if not self.passcode.isHidden() and received > self._passcode_mark:
+            self.passcode.hide()
         self._seen = received
         self.t_recv.set(human_bytes(received))
         self.t_kept.set(f"{kept} 个")
@@ -547,8 +567,18 @@ class ExtractPage(Page):
         self.retry_t.setText(f"连接中断，正在自动重试（第 {n}/{mx} 次）…")
         self.retry.show()
 
+    def set_passcode(self, on):
+        """锁屏提示。再次收到字节后由 update_stats 收起。"""
+        if on:
+            if self.passcode.isHidden():
+                self._passcode_mark = self._seen
+            self.passcode.show()
+        else:
+            self.passcode.hide()
+
     def set_scanning(self):
         self.retry.hide()
+        self.passcode.hide()
         self.state.setText("正在解密并查找存档…（大存档约需 10–30 秒）")
         self.btn_cancel.setEnabled(False)
 

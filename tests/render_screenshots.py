@@ -105,6 +105,9 @@ def main():
     x.set_retrying(2, 5)
     shot("03b_extracting_retry")
     x.retry.hide()
+    x.set_passcode(True)
+    shot("03d_passcode")
+    x.set_passcode(False)
     x.show_error("ERR_BACKUP_DENIED", None)
     shot("03c_extract_error")
 

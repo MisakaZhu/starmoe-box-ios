@@ -1,5 +1,5 @@
 """主窗口与流程控制。启动：python -m starmoe_ios.gui"""
-import getpass, hashlib, logging, os, sys, time
+import getpass, hashlib, logging, os, subprocess, sys, time
 from PySide6.QtCore import Qt, QEvent, QObject, QPoint, QSettings, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QIcon, QPixmap, QRegion
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -17,6 +17,22 @@ from ..errors import StarMoeError, ERR_AUTH, ERR_AUTH_EXPIRED, ERR_PASSWORD, ERR
 log = logging.getLogger("starmoe.gui")
 SERVER_ID = "StarMoeBox-iOS-" + hashlib.sha1(getpass.getuser().encode()).hexdigest()[:8]
 MAX_RETRIES = 5
+PASSCODE_NOTICE = "请解锁 iPhone 并输入锁屏密码，备份才会继续"
+
+
+def alert_passcode(window, notify=None):
+    """把用户叫回来：macOS 程序坞弹跳 + 通知，Windows 任务栏闪烁。notify 供测试替换系统通知。"""
+    QApplication.alert(window, 0)
+    if notify is not None:
+        notify()
+        return
+    if sys.platform == "darwin":
+        try:
+            subprocess.Popen(
+                ["osascript", "-e", f'display notification "{PASSCODE_NOTICE}" with title "StarMoe Box"'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            pass
 
 
 class Bridge(QObject):
@@ -49,6 +65,7 @@ class MainWindow(QMainWindow):
         self.auto_upload = False
         self.refetched = False
         self.apple_ok = sys.platform != "win32"
+        self._passcode_alerted = False
 
         root = QWidget()
         root.setObjectName("root")
@@ -403,7 +420,14 @@ class MainWindow(QMainWindow):
         if not w:
             return
         s = w.stats
-        self.p[self.X].update_stats(s.percent, s.received, s.kept, s.kept_bytes, time.time() - s.started, s.phase)
+        page = self.p[self.X]
+        page.update_stats(s.percent, s.received, s.kept, s.kept_bytes, time.time() - s.started, s.phase)
+        page.set_passcode(bool(s.passcode_needed))
+        if s.passcode_needed and not self._passcode_alerted:
+            self._passcode_alerted = True
+            alert_passcode(self)
+        elif not s.passcode_needed:
+            self._passcode_alerted = False
 
     def cancel_backup(self):
         if self.busy() and QMessageBox.question(
