@@ -2,9 +2,10 @@
 import os, sys
 from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox, QComboBox
+from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextBrowser, QDialogButtonBox
 from . import theme as T, paths, SOURCE_URL, VERSION
-from .widgets import label, chip, button, Card, divider, hbox, vbox, IconBadge, Logo
+from .widgets import label, chip, button, Card, divider, hbox, vbox, IconBadge, Logo, SegmentedControl
+from .. import core
 
 
 def resource_path(*p):
@@ -38,19 +39,22 @@ class SettingsDialog(QDialog):
             if i:
                 c.lay.addWidget(divider())
             bs = []
+            seg = None
             if title == "默认服务器":
-                cb = QComboBox()
-                cb.addItem("国际服", "intl")
-                cb.addItem("日服", "jp")
-                cb.setCurrentIndex(0 if server == "intl" else 1)
-                cb.currentIndexChanged.connect(lambda _i, cb=cb: self.server_changed.emit(cb.currentData()))
-                bs.append(cb)
+                seg = SegmentedControl([("intl", "国际服"), ("jp", "日服")], server)
+                bs.append(seg)
                 btns = []
             for text, act, kind in btns:
                 b = button(text, kind, "external" if act == "source" else None)
                 b.clicked.connect(lambda _=False, a=act: self._do(a))
                 bs.append(b)
             s = label(sub, "small", wrap=True, sel=True)
+            if seg is not None:
+                def on_server(key, lab=s):
+                    lab.setText(f"{core.SERVER_NAMES.get(key, key)}（{core.BUNDLE_OF.get(key, '')}）")
+                    self.server_changed.emit(key)
+                seg.changed.connect(on_server)
+                self._server_seg = seg
             c.lay.addWidget(hbox(IconBadge(ic, T.PURPLE, T.PURPLE_SOFT, 34, 17, 10),
                                  vbox(label(title, "value"), s, spacing=2), *bs, spacing=12, margins=(0, 12, 0, 12)))
             hbox_w = c.lay.itemAt(c.lay.count() - 1).widget()

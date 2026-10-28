@@ -353,6 +353,58 @@ class Option(Card):
         self.clicked.emit()
 
 
+class SegmentedControl(QWidget):
+    """两段（或多段）圆角切换。选中项用主题紫蓝渐变 + 白字，未选中透明深色字。"""
+    changed = Signal(str)
+
+    def __init__(self, items, current=None):
+        super().__init__()
+        self.setObjectName("segment")
+        self._keys = [k for k, _ in items]
+        self._value = current if current in self._keys else self._keys[0]
+        self.setFixedHeight(36)
+        self.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(3, 3, 3, 3)
+        lay.setSpacing(2)
+        self._buttons = {}
+        for key, text in items:
+            b = QPushButton(text)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setFixedHeight(30)
+            b.clicked.connect(lambda _=False, k=key: self._pick(k))
+            self._buttons[key] = b
+            lay.addWidget(b)
+        self._restyle()
+
+    def value(self):
+        return self._value
+
+    def set_value(self, key):
+        if key not in self._buttons or key == self._value:
+            return
+        self._value = key
+        self._restyle()
+        self.changed.emit(key)
+
+    def _pick(self, key):
+        self.set_value(key)
+
+    def _restyle(self):
+        self.setStyleSheet("QWidget#segment { background: #F3F1FA; border-radius: 18px; }")
+        for key, b in self._buttons.items():
+            if key == self._value:
+                b.setStyleSheet(
+                    f"QPushButton {{ background: {T.GRAD}; color: #FFFFFF; border: none;"
+                    f" border-radius: 15px; padding: 4px 16px; font-weight: 700; }}")
+            else:
+                b.setStyleSheet(
+                    f"QPushButton {{ background: transparent; color: {T.TEXT}; border: none;"
+                    f" border-radius: 15px; padding: 4px 16px; font-weight: 600; }}"
+                    "QPushButton:hover { background: rgba(139, 124, 246, 0.14); }")
+
+
 # ---- 错误卡片（设计稿 07） -------------------------------------------------------------
 # code: (图标, 前景色, 底色, 标题, 步骤, 默认说明, [(按钮文字, action, 图标)])
 ERRORS = {

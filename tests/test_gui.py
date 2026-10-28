@@ -260,4 +260,20 @@ spin(1500)
 api.exchange = real_exchange
 assert ups == [1, 1] and not w.auto_upload, ups
 print("AUTO UPLOAD OK")
+
+# 13) 设置里的服务器切换是分段按钮，不是系统 QComboBox；选择会写回并保持
+from PySide6.QtWidgets import QComboBox
+from starmoe_ios.gui.settings_dialog import SettingsDialog
+from starmoe_ios.gui.widgets import SegmentedControl
+picked = []
+dlg = SettingsDialog(None, "官方 StarMoe Box", "国际服（com.bilibili.sirius）", "jp")
+assert dlg.findChildren(QComboBox) == []
+seg = dlg.findChild(SegmentedControl)
+assert seg is not None and seg.value() == "jp"
+dlg.server_changed.connect(picked.append)
+seg.set_value("intl")
+assert picked == ["intl"] and seg.value() == "intl"
+seg.set_value("intl")
+assert picked == ["intl"]
+print("SERVER SEGMENT OK")
 print("GUI TESTS OK")

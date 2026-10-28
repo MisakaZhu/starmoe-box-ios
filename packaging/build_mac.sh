@@ -22,6 +22,12 @@ case "$(uname -m)" in arm64) ARCH=arm64 ;; *) ARCH=x64 ;; esac
 DMG="dist/StarMoeBox-mac-$ARCH.dmg"
 IDENTITY="${MACOS_SIGN_IDENTITY:-${CODESIGN_IDENTITY:-}}"
 IDENTITY=$(printf '%s' "$IDENTITY" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//')
+# 钥匙串密码和 Apple ID 专用密码只去掉首尾空白，避免密钥里夹进换行导致公证 401。不打印内容。
+trim() { printf '%s' "$1" | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'; }
+APPLE_ID=$(trim "${APPLE_ID:-}")
+APPLE_TEAM_ID=$(trim "${APPLE_TEAM_ID:-}")
+APPLE_APP_PASSWORD=$(trim "${APPLE_APP_PASSWORD:-}")
+MACOS_CERT_PASSWORD=$(trim "${MACOS_CERT_PASSWORD:-}")
 TMP=$(mktemp -d)
 KEYCHAIN=""
 ORIG_LIST=""
