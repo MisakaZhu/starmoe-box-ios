@@ -5,6 +5,8 @@ from .. import core, device
 from ..errors import StarMoeError, ERR_DISCONNECTED, ERR_NO_DEVICE, ERR_NOT_TRUSTED, ERR_NETWORK
 
 log = logging.getLogger("starmoe.gui")
+# 快照阶段没有字节也不当断线；超过这个时间仍是 0 字节，才按断线重试
+PREPARE_WAIT_S = 15 * 60
 
 
 def _err(e):
@@ -124,8 +126,17 @@ class BackupWorker(QThread):
                     else:
                         self.cancelled.emit()
                     return
-                retryable = device.is_disconnect(e) or (isinstance(e, StarMoeError) and e.code in (ERR_NO_DEVICE, ERR_NOT_TRUSTED)
-                                                        and self.stats.received > 0)
+                # 还没收到任何数据时的读超时 = 手机在准备快照，安静地再开一次备份，不弹“连接中断”
+                if (device.is_idle_timeout(e) and self.stats.received == 0
+                        and time.time() - self.stats.started < PREPARE_WAIT_S):
+                    self.stats.phase = "preparing"
+                    log.info("手机仍在准备备份（尚无数据），继续等待，不记为断线：%r", e)
+                    continue
+                preparing_gave_up = (device.is_idle_timeout(e) and self.stats.received == 0
+                                     and time.time() - self.stats.started >= PREPARE_WAIT_S)
+                retryable = preparing_gave_up or device.is_disconnect(e) or (
+                    isinstance(e, StarMoeError) and e.code in (ERR_NO_DEVICE, ERR_NOT_TRUSTED)
+                    and self.stats.received > 0)
                 log.warning("备份中断（第 %d 次）：%r", attempt + 1, e)
                 if not retryable:
                     self.failed.emit(*_err(e))

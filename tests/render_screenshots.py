@@ -97,8 +97,10 @@ def main():
     x = w.p[w.X]
     w.go(w.X)
     x.reset()
-    x._last = (time.time() - 1, 9_400_000_000)
-    x.update_stats(68, 9_400_000_000 + 41_000_000, 37, 12_400_000, 754, "transferring")
+    now = time.time()
+    base = 9_400_000_000
+    x._rate.samples = [(now - 30, base)]
+    x.update_stats(68, base + 41_000_000 * 30, 37, 12_400_000, 754, "transferring", now=now)
     shot("03_extracting")
     x.set_retrying(2, 5)
     shot("03b_extracting_retry")

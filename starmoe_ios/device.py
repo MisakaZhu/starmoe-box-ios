@@ -24,10 +24,17 @@ def _exc_names(e):
 
 DISCONNECT_ERRORS = {"ConnectionTerminatedError", "ConnectionAbortedError", "ConnectionResetError",
                      "BrokenPipeError", "IncompleteReadError", "NoDeviceConnectedError",
-                     "ConnectionFailedError", "DeviceNotFoundError", "TimeoutError", "MuxException"}
+                     "ConnectionFailedError", "DeviceNotFoundError", "MuxException"}
+
+
+def is_idle_timeout(e):
+    """读超时：手机做快照时可能几分钟不发数据，不等于线断了。"""
+    return "TimeoutError" in _exc_names(e)
 
 
 def is_disconnect(e):
+    if is_idle_timeout(e):
+        return False
     return bool(_exc_names(e) & DISCONNECT_ERRORS) or (isinstance(e, OSError) and not isinstance(e, FileNotFoundError))
 
 
@@ -136,7 +143,7 @@ class BackupStats:
         self.dropped = 0
         self.percent = 0.0     # 手机报告的进度
         self.started = time.time()
-        self.phase = "connecting"   # connecting / waiting_device / transferring / finishing
+        self.phase = "connecting"   # connecting / preparing / transferring / finishing
         self.will_encrypt = None
         self.udid_dir = None
 
@@ -203,7 +210,7 @@ async def run_filtered_backup(bundle, out_dir, stats=None, fake_free=8 << 40, fu
         async with Mobilebackup2Service(ld) as mb:
             stats.will_encrypt = enc = await mb.get_will_encrypt()
             say(f"手机开启了备份加密: {enc}")
-            stats.phase = "waiting_device"   # 手机可能要求输入锁屏密码
+            stats.phase = "preparing"   # 手机先做快照，可能 5–10 分钟都是 0 字节
             try:
                 await mb.backup(full=full, backup_directory=out_dir, progress_callback=progress, filter_callback=keep)
             except Exception as e:

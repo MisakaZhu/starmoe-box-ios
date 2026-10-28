@@ -21,6 +21,42 @@ def mmss(sec):
     return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}" if sec >= 3600 else f"{sec // 60:02d}:{sec % 60:02d}"
 
 
+class TransferRate:
+    """最近一小段真实传输的速度。准备阶段（字节不增加）不计入。"""
+
+    def __init__(self, window=45.0):
+        self.window = window
+        self.samples = []
+        self.rate = 0.0
+
+    def observe(self, t, received, active):
+        if not active:
+            return self.rate
+        if self.samples and received < self.samples[-1][1]:
+            self.samples.clear()
+            self.rate = 0.0
+        if received <= 0 or (self.samples and received == self.samples[-1][1]):
+            return self.rate
+        self.samples.append((float(t), int(received)))
+        cutoff = t - self.window
+        while len(self.samples) >= 2 and self.samples[1][0] <= cutoff:
+            self.samples.pop(0)
+        if len(self.samples) >= 2:
+            t0, b0 = self.samples[0]
+            t1, b1 = self.samples[-1]
+            dt = t1 - t0
+            if dt > 0 and b1 > b0:
+                self.rate = (b1 - b0) / dt
+        return self.rate
+
+
+def eta_seconds(received, percent, rate):
+    """按当前速度和手机报告的百分比估算剩余秒数。与已经过去的墙钟时间无关。"""
+    if rate <= 0 or received <= 0 or not (0 < percent < 100):
+        return None
+    return received * (100.0 - percent) / percent / rate
+
+
 class Page(QWidget):
     action = Signal(str)   # 统一的动作信号（错误卡片按钮等）
 
@@ -416,7 +452,8 @@ class ExtractPage(Page):
         self.bar = QProgressBar()
         self.bar.setRange(0, 1000)
         self.bar.setTextVisible(False)
-        top.lay.addWidget(vbox(hbox(self.state, None, self.eta), self.bar, spacing=10), 1)
+        self.note = label("", "muted", wrap=True)
+        top.lay.addWidget(vbox(hbox(self.state, None, self.eta), self.bar, self.note, spacing=8), 1)
         self.body.addWidget(top)
         tiles = QHBoxLayout()
         tiles.setSpacing(12)
@@ -447,38 +484,57 @@ class ExtractPage(Page):
         self.btn_cancel = button("取消提取", None, "x")
         self.btn_cancel.clicked.connect(lambda: self.action.emit("cancel"))
         self.footer.addWidget(self.btn_cancel)
-        self._last = (0.0, 0)
+        self._rate = TransferRate()
         self._speed = 0.0
+        self._seen = 0
+        self._banner_mark = 0
 
     def reset(self):
         self.clear_error()
         self.retry.hide()
+        self._determinate()
         self.bar.setValue(0)
         self.pct.setText("0%")
         self.state.setText("正在连接 iPhone…")
         self.eta.setText("")
+        self.note.setText("")
         self.btn_cancel.setEnabled(True)
-        self._last = (time.time(), 0)
+        self._rate = TransferRate()
         self._speed = 0.0
+        self._seen = 0
+        self._banner_mark = 0
         self.update_stats(0, 0, 0, 0, 0, "connecting")
 
-    def update_stats(self, percent, received, kept, kept_bytes, elapsed, phase):
-        now = time.time()
-        t0, r0 = self._last
-        if now - t0 >= 1.0:
-            inst = (received - r0) / (now - t0)
-            self._speed = inst if not self._speed else 0.7 * self._speed + 0.3 * inst
-            self._last = (now, received)
+    def _determinate(self):
+        if self.bar.maximum() == 0:
+            self.bar.setRange(0, 1000)
+
+    def update_stats(self, percent, received, kept, kept_bytes, elapsed, phase, now=None):
+        now = time.time() if now is None else now
+        active = phase == "transferring" and received > 0
+        self._speed = self._rate.observe(now, received, active)
         p = max(0.0, min(100.0, percent))
-        self.pct.setText(f"{p:.0f}%")
-        self.bar.setValue(int(p * 10))
-        self.state.setText({"connecting": "正在连接 iPhone…",
-                            "waiting_device": "等待手机响应…如果手机要求输入密码，请输入锁屏密码",
-                            "transferring": "正在接收备份数据…", "finishing": "正在收尾…",
-                            "scanning": "正在解密并查找存档…"}.get(phase, phase))
-        if 3 < p < 100 and elapsed > 20:
-            rest = elapsed * (100 - p) / p
-            self.eta.setText(f"预计剩余约 {max(1, round(rest / 60))} 分钟")
+        if phase in ("preparing", "waiting_device") and received <= 0:
+            self.bar.setRange(0, 0)
+            self.pct.setText("…")
+            self.state.setText("手机正在准备备份数据，第一次可能需要 5–10 分钟，请保持亮屏")
+            self.eta.setText("如果手机要求输入密码，请输入锁屏密码")
+            self.note.setText("")
+        else:
+            self._determinate()
+            self.pct.setText(f"{p:.0f}%")
+            self.bar.setValue(int(p * 10))
+            self.state.setText({"connecting": "正在连接 iPhone…",
+                                "preparing": "手机正在准备备份数据，第一次可能需要 5–10 分钟，请保持亮屏",
+                                "waiting_device": "手机正在准备备份数据，第一次可能需要 5–10 分钟，请保持亮屏",
+                                "transferring": "正在接收备份数据…", "finishing": "正在收尾…",
+                                "scanning": "正在解密并查找存档…"}.get(phase, phase))
+            secs = eta_seconds(received, p, self._speed) if active else None
+            self.eta.setText(f"预计剩余约 {max(1, round(secs / 60))} 分钟" if secs else "")
+            self.note.setText("整机数据需要全部传一遍，只保留游戏文件" if active else "")
+        if not self.retry.isHidden() and received > self._banner_mark:
+            self.retry.hide()
+        self._seen = received
         self.t_recv.set(human_bytes(received))
         self.t_kept.set(f"{kept} 个")
         self.t_speed.set(f"{human_bytes(self._speed)}/s" if self._speed > 0 else "—")
@@ -487,6 +543,7 @@ class ExtractPage(Page):
             self.kept_title.setText(f"仅保存游戏数据，占用约 {human_bytes(kept_bytes)}")
 
     def set_retrying(self, n, mx):
+        self._banner_mark = self._seen
         self.retry_t.setText(f"连接中断，正在自动重试（第 {n}/{mx} 次）…")
         self.retry.show()
 

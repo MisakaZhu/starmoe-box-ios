@@ -54,6 +54,9 @@ def make_runner(plan, calls):
         stats.received += 1000
         if step == "hang":
             await asyncio.sleep(60)
+        if step == "prepare_timeout":
+            stats.received = 0
+            raise TimeoutError("snapshot")
         if step == "deny":
             raise StarMoeError("ERR_BACKUP_DENIED", "denied")
         if step in ("save_drop", "ok"):
@@ -108,6 +111,74 @@ QTimer.singleShot(500, w.cancel)
 finish(loop, w)
 assert ev["cancelled"] and not ev["found"], ev
 print("CANCEL OK")
+
+# 5b) 快照阶段的读超时不是断线：不弹重试横幅，并继续下一次备份
+calls = []
+w, ev, loop = run_worker(make_runner(["prepare_timeout", "ok"], calls))
+finish(loop, w)
+assert calls == ["prepare_timeout", "ok"] and ev["retrying"] == [] and ev["found"], (calls, ev)
+print("PREPARE WAIT OK")
+
+# 5c) 准备超过 15 分钟仍是 0 字节，才按断线重试
+calls = []
+
+
+async def late_prepare(bundle, out_dir, stats, on_log=None, **_):
+    step = plan_late[len(calls)]
+    calls.append(step)
+    if step == "late":
+        stats.started = time.time() - 16 * 60
+        stats.received = 0
+        raise TimeoutError("snapshot")
+    stats.udid_dir = pathlib.Path(out_dir) / "UDID"
+    stats.udid_dir.mkdir(parents=True, exist_ok=True)
+    (stats.udid_dir / "ab").mkdir(exist_ok=True)
+    (stats.udid_dir / "ab" / ("ab" + "0" * 38)).write_bytes(BLOB)
+    stats.kept += 1
+    return stats.udid_dir, False
+
+
+plan_late = ["late", "ok"]
+w, ev, loop = run_worker(late_prepare)
+finish(loop, w)
+assert calls == ["late", "ok"] and ev["retrying"] == [(1, 5)] and ev["found"], (calls, ev)
+print("PREPARE TIMEOUT OK")
+
+# 5d) ETA 用最近传输速度，不把准备阶段的空等算进去
+from starmoe_ios.gui.pages import ExtractPage, eta_seconds, TransferRate
+received = int(17.7 * 1024 ** 3)
+rate = 265.4 * 1024 ** 2
+elapsed = 10 * 60 + 48
+old_minutes = elapsed * (100 - 5) / 5 / 60
+assert old_minutes > 180   # 旧算法会得到约 205 分钟
+secs = eta_seconds(received, 5, rate)
+assert 20 * 60 <= secs <= 23 * 60, secs
+page = ExtractPage()
+t0 = 1_000_000.0
+page._rate.samples = [(t0, int(received - rate * 45))]
+page.update_stats(5, received, 3, 0, elapsed, "transferring", now=t0 + 45)
+assert page.eta.text().startswith("预计剩余约") and "187" not in page.eta.text(), page.eta.text()
+mins = int(page.eta.text().split("约")[1].split("分钟")[0])
+assert 20 <= mins <= 23, page.eta.text()
+assert page.note.text() == "整机数据需要全部传一遍，只保留游戏文件"
+assert "MB/s" in page.t_speed.v.text() or "GB/s" in page.t_speed.v.text(), page.t_speed.v.text()
+# 准备阶段：不定进度，且 0 字节样本不拉低速度
+page.update_stats(0, 0, 0, 0, 300, "preparing", now=t0 + 50)
+assert "准备备份" in page.state.text() and page.bar.maximum() == 0
+assert page._rate.rate > 0   # 准备阶段不把速度清成按全程平均
+# 重试横幅在再次收到数据后消失
+page.set_retrying(1, 5)
+assert not page.retry.isHidden()
+page.update_stats(5, received, 3, 0, elapsed, "transferring", now=t0 + 46)
+assert page.retry.isHidden()
+# 纯窗口：更早的 0 字节点若被 observe 在非传输阶段，不应进入样本
+r = TransferRate()
+r.observe(0, 0, False)
+r.observe(600, 0, False)
+r.observe(600, received - rate * 45, True)
+r.observe(645, received, True)
+assert abs(r.rate - rate) / rate < 0.02, r.rate
+print("ETA OK", page.eta.text(), page.t_speed.v.text())
 
 
 # 6) TokenStore：分字段保存、自动刷新、轮换 refresh token、退出登录
